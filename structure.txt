@@ -37,3 +37,7 @@ python -m pip freeze > requirements.txt
 cd ..
 ..................................
 
+pytest -q
+
+alembic --version
+
