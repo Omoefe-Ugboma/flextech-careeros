@@ -1,0 +1,39 @@
+flextech-careeros/
+│
+├── backend/
+│   ├── .venv/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── core/
+│   │   ├── api/
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   └── services/
+│   ├── tests/
+│   └── requirements.txt
+│
+├── frontend/
+├── docs/
+└── README.md
+
+(.venv) 
+HP@DESKTOP-3GO22K0 MINGW64 ~/Desktop/Interview/REA/flextech-careeros/backend (main)
+
+cd backend
+
+python -m venv .venv
+
+source .venv/Scripts/activate
+
+docker info
+
+python -m uvicorn app.main:app --reload
+
+............................
+cd backend
+source .venv/Scripts/activate
+python -m pip freeze > requirements.txt
+cd ..
+..................................
+
