@@ -4,7 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Candidate
+from app.models import Candidate, CVDocument
 
 from fastapi import UploadFile, File
 
@@ -20,6 +20,10 @@ from app.schemas.candidate import (
 
 from app.services.cv.text_extractor import extract_cv_text
 from app.services.cv.ai_extractor import extract_candidate_information
+from datetime import datetime, timezone
+
+from app.schemas.cv_extraction import CVExtraction
+from sqlalchemy.exc import IntegrityError
 
 router = APIRouter(
     prefix="/api/v1/candidates",
@@ -189,5 +193,140 @@ async def upload_candidate_cv(
 
     db.commit()
     db.refresh(cv_document)
+
+    return cv_document
+
+
+
+@router.get(
+    "/{candidate_id}/cv/{cv_document_id}",
+    response_model=CVDocumentRead,
+    status_code=status.HTTP_200_OK,
+)
+def get_candidate_cv(
+    candidate_id: int,
+    cv_document_id: int,
+    db: Session = Depends(get_db),
+):
+    # 1. Confirm that the candidate exists.
+    candidate = db.get(Candidate, candidate_id)
+
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate not found.",
+        )
+
+    # 2. Retrieve the CV belonging to this candidate.
+    cv_document = db.scalar(
+        select(CVDocument).where(
+            CVDocument.id == cv_document_id,
+            CVDocument.candidate_id == candidate_id,
+        )
+    )
+
+    if cv_document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CV document not found for this candidate.",
+        )
+
+    # 3. Return the CV document and its review information.
+    return cv_document
+
+
+
+@router.post(
+    "/{candidate_id}/cv/{cv_document_id}/approve",
+    response_model=CVDocumentRead,
+    status_code=status.HTTP_200_OK,
+)
+def approve_candidate_cv(
+    candidate_id: int,
+    cv_document_id: int,
+    reviewed_data: CVExtraction,
+    db: Session = Depends(get_db),
+):
+    # 1. Confirm that the candidate exists.
+    candidate = db.get(Candidate, candidate_id)
+
+    if candidate is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Candidate not found.",
+        )
+
+    # 2. Find the CV belonging to this candidate.
+    cv_document = db.scalar(
+        select(CVDocument).where(
+            CVDocument.id == cv_document_id,
+            CVDocument.candidate_id == candidate_id,
+        )
+    )
+
+    if cv_document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="CV document not found for this candidate.",
+        )
+
+    # 3. Ensure AI extraction has completed.
+    if cv_document.processing_status != "processed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="CV processing must complete before approval.",
+        )
+
+    # 4. Prevent repeated approval.
+    if cv_document.review_status != "pending_review":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This CV has already been reviewed.",
+        )
+
+    # 5. Preserve the original extraction and save reviewed data.
+    cv_document.approved_data = reviewed_data.model_dump(
+        mode="json"
+    )
+
+    # 6. Update the candidate's main profile.
+    candidate_fields = [
+        "full_name",
+        "email",
+        "phone",
+        "location",
+        "professional_headline",
+        "professional_summary",
+    ]
+
+    for field in candidate_fields:
+        value = getattr(reviewed_data, field)
+
+        if value is not None:
+            setattr(candidate, field, value)
+
+    # 7. Record human approval.
+    cv_document.review_status = "approved"
+    cv_document.reviewed_at = datetime.now(timezone.utc)
+
+    # 8. Save everything in one transaction.
+    try:
+        db.commit()
+        db.refresh(cv_document)
+        db.refresh(candidate)
+
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The reviewed email address is already in use.",
+        )
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not approve CV information.",
+        )
 
     return cv_document

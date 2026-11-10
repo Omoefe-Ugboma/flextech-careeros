@@ -1,3 +1,4 @@
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from app.main import app
 
 
 @pytest.fixture
-def client():
+def test_db():
     test_engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -25,12 +26,19 @@ def client():
 
     Base.metadata.create_all(bind=test_engine)
 
+    db = TestingSessionLocal()
+
+    yield db
+
+    db.close()
+    Base.metadata.drop_all(bind=test_engine)
+    test_engine.dispose()
+
+
+@pytest.fixture
+def client(test_db):
     def override_get_db():
-        db = TestingSessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield test_db
 
     app.dependency_overrides[get_db] = override_get_db
 
@@ -38,5 +46,3 @@ def client():
         yield test_client
 
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=test_engine)
-    test_engine.dispose()
