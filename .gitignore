@@ -23,3 +23,7 @@ dist/
 .DS_Store
 Thumbs.db
 EOF
+
+# Uploaded candidate documents
+backend/storage/cvs/*
+!backend/storage/cvs/.gitkeep

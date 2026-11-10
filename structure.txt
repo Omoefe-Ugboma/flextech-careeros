@@ -41,3 +41,7 @@ pytest -q
 
 alembic --version
 
+pytest -q -s tests/test_cv_extraction.py
+
+
+https://platform.openai.com/settings/organization/people/members
