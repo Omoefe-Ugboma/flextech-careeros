@@ -1,6 +1,8 @@
+
 from fastapi import FastAPI
 
 from app.api.candidates import router as candidates_router
+from app.api.job_descriptions import router as job_descriptions_router
 
 app = FastAPI(
     title="FlexTech CareerOS",
@@ -9,6 +11,7 @@ app = FastAPI(
 )
 
 app.include_router(candidates_router)
+app.include_router(job_descriptions_router)
 
 
 @app.get("/")

@@ -1,4 +1,3 @@
-cat > .gitignore <<'EOF'
 # Python
 __pycache__/
 *.py[cod]
@@ -22,7 +21,6 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
-EOF
 
 # Uploaded candidate documents
 backend/storage/cvs/*
