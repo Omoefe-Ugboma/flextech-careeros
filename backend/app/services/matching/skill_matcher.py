@@ -1,9 +1,17 @@
-
 SKILL_ALIASES = {
+    # Database aliases
     "postgres": "postgresql",
     "postgresql": "postgresql",
+
+    # React aliases
     "reactjs": "react",
     "react.js": "react",
+    "react js": "react",
+
+    # Git aliases
+    "git/github": "git",
+    "git and github": "git",
+    "git & github": "git",
 }
 
 def normalize_skill(skill: str) -> str:
@@ -36,7 +44,7 @@ def compare_skills(
         "missing_skills": sorted(missing),
         "extra_skills": sorted(extra),
     }
-    
+
 
 def calculate_skill_coverage(
     matched_skills: list[str],
@@ -129,7 +137,7 @@ def build_skill_match_result(
         "required_skill_coverage": coverage,
         "skill_evidence": matched_evidence,
     }
-    
+
 
 def build_preferred_skill_result(
     approved_cv: dict,
@@ -161,7 +169,7 @@ def build_preferred_skill_result(
         "preferred_skill_coverage": coverage,
         "preferred_skill_evidence": matched_evidence,
     }
-    
+
 
 
 def build_complete_skill_match_result(

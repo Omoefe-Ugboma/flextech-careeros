@@ -1,6 +1,9 @@
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from app.services.matching.score_calculator import (
+    calculate_match_score,
+)
 
 from app.models import (
     Candidate,
@@ -116,10 +119,14 @@ def run_candidate_job_match(
         job_data=job_description.extracted_data,
     )
 
-    # 4. Calculate the overall score.
-    match_score = match_results["skills"]["required_skills"][
-        "required_skill_coverage"
-    ]
+
+    # 4. Calculate the weighted overall score.
+    score_breakdown = calculate_match_score(match_results)
+
+    match_score = score_breakdown["overall_score"]
+
+    # Keep the full scoring explanation with the matching results.
+    match_results["scoring"] = score_breakdown
 
     # 5. Create a database record.
     match_record = CandidateJobMatch(

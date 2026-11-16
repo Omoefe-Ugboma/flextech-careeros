@@ -1,29 +1,33 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import Candidate, CVDocument
-
-from fastapi import UploadFile, File
-
-from app.models import CVDocument
-from app.schemas.cv_document import CVDocumentRead
-from app.services.cv.file_service import save_cv_file
-
 from app.schemas.candidate import (
     CandidateCreate,
     CandidateRead,
     CandidateUpdate,
 )
-
-from app.services.cv.text_extractor import extract_cv_text
-from app.services.cv.ai_extractor import extract_candidate_information
-from datetime import datetime, timezone
-
+from app.schemas.cv_document import CVDocumentRead
 from app.schemas.cv_extraction import CVExtraction
-from sqlalchemy.exc import IntegrityError
+from app.services.cv.ai_extractor import extract_candidate_information
+from app.services.cv.file_service import save_cv_file
+from app.services.cv.text_extractor import extract_cv_text
+
 
 router = APIRouter(
     prefix="/api/v1/candidates",
@@ -152,8 +156,8 @@ async def upload_candidate_cv(
         )
 
     # Extract text from the uploaded document.
-    
-    
+
+
     # Stage 1: Extract text from the uploaded document.
     try:
         extracted_text = extract_cv_text(cv_document.file_path)
@@ -217,7 +221,7 @@ def get_candidate_cv(
             detail="Candidate not found.",
         )
 
-    # 2. Retrieve the CV belonging to this candidate.
+    # 2. Retrieve and lock the candidate's CV.
     cv_document = db.scalar(
         select(CVDocument).where(
             CVDocument.id == cv_document_id,
@@ -244,7 +248,7 @@ def get_candidate_cv(
 def approve_candidate_cv(
     candidate_id: int,
     cv_document_id: int,
-    reviewed_data: CVExtraction,
+    reviewed_data: CVExtraction | None = None,
     db: Session = Depends(get_db),
 ):
     # 1. Confirm that the candidate exists.
@@ -258,10 +262,12 @@ def approve_candidate_cv(
 
     # 2. Find the CV belonging to this candidate.
     cv_document = db.scalar(
-        select(CVDocument).where(
+        select(CVDocument)
+        .where(
             CVDocument.id == cv_document_id,
             CVDocument.candidate_id == candidate_id,
         )
+        .with_for_update()
     )
 
     if cv_document is None:
@@ -285,7 +291,28 @@ def approve_candidate_cv(
         )
 
     # 5. Preserve the original extraction and save reviewed data.
-    cv_document.approved_data = reviewed_data.model_dump(
+    # 5. Select the data to approve.
+    if reviewed_data is not None:
+        approved_data = reviewed_data
+    else:
+        if not cv_document.extracted_data:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No extracted CV information is available for approval.",
+            )
+
+        try:
+            approved_data = CVExtraction.model_validate(
+                cv_document.extracted_data
+            )
+        except ValidationError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Extracted CV information is invalid and cannot be approved.",
+            )
+
+    # 6. Save the approved information.
+    cv_document.approved_data = approved_data.model_dump(
         mode="json"
     )
 
@@ -300,7 +327,7 @@ def approve_candidate_cv(
     ]
 
     for field in candidate_fields:
-        value = getattr(reviewed_data, field)
+        value = getattr(approved_data, field)
 
         if value is not None:
             setattr(candidate, field, value)

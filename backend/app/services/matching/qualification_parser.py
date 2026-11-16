@@ -1,25 +1,24 @@
 
-
 import re
 
 
 ACADEMIC_QUALIFICATION_PATTERNS = {
     "doctorate": [
-        r"\bph\.?d\.?\b",
+        r"\bph\.?\s*d\.?\b",
         r"\bdoctorate\b",
         r"\bdoctoral degree\b",
         r"\bdoctor of philosophy\b",
     ],
     "master": [
-        r"\bm\.?sc\.?\b",
-        r"\bm\.?a\.?\b",
+        r"\bm\.?\s*sc\.?\b",
+        r"\bm\.?\s*a\.?\b",
         r"\bmaster(?:'s)? degree\b",
         r"\bmaster of science\b",
         r"\bmaster of arts\b",
     ],
     "bachelor": [
-        r"\bb\.?sc\.?\b",
-        r"\bb\.?a\.?\b",
+        r"\bb\.?\s*sc\.?\b",
+        r"\bb\.?\s*a\.?\b",
         r"\bbachelor(?:'s)? degree\b",
         r"\bbachelor of science\b",
         r"\bbachelor of arts\b",
@@ -36,6 +35,7 @@ ACADEMIC_QUALIFICATION_PATTERNS = {
 def extract_academic_level(
     qualification_text: str,
 ) -> str | None:
+
     normalized = qualification_text.strip().lower()
 
     for level, patterns in ACADEMIC_QUALIFICATION_PATTERNS.items():
@@ -46,15 +46,17 @@ def extract_academic_level(
     return None
 
 
-
 def extract_academic_field(
     qualification_text: str,
 ) -> str | None:
+
     normalized = qualification_text.strip().lower()
 
     patterns = [
         r"\bdegree\s+in\s+([a-z][a-z\s&/-]*?)(?=\s+(?:or|and|with|plus)\b|[,;.]|$)",
-        r"\b(?:b\.?sc\.?|b\.?a\.?|m\.?sc\.?|m\.?a\.?|ph\.?d\.?)\s+in\s+([a-z][a-z\s&/-]*?)(?=\s+(?:or|and|with|plus)\b|[,;.]|$)",
+
+        r"\b(?:b\.?\s*sc\.?|b\.?\s*a\.?|m\.?\s*sc\.?|m\.?\s*a\.?|ph\.?\s*d\.?)\s+in\s+([a-z][a-z\s&/-]*?)(?=\s+(?:or|and|with|plus)\b|[,;.]|$)",
+
         r"\bdiploma\s+in\s+([a-z][a-z\s&/-]*?)(?=\s+(?:or|and|with|plus)\b|[,;.]|$)",
     ]
 

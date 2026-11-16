@@ -80,7 +80,7 @@ def test_approve_cv_successfully(client, test_db):
     ]
     assert data["extracted_data"]["skills"] == ["Python"]
     assert data["reviewed_at"] is not None
-    
+
     assert data["extracted_data"]["full_name"] == "Test Candidate"
     assert data["extracted_data"]["skills"] == ["Python"]
 
@@ -220,3 +220,101 @@ def test_approval_updates_candidate_profile(client, test_db):
     )
     assert profile["phone"] == "+230 50000000"
     assert profile["location"] == "Mauritius"
+
+
+
+
+def test_approve_cv_without_request_body(client, test_db):
+    candidate_id = create_candidate(client)
+
+    cv_document_id = create_processed_cv(
+        client,
+        candidate_id,
+        test_db,
+    )
+
+    url = (
+        f"/api/v1/candidates/{candidate_id}"
+        f"/cv/{cv_document_id}/approve"
+    )
+
+    response = client.post(url)
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["review_status"] == "approved"
+    assert data["approved_data"]["full_name"] == "Test Candidate"
+    assert data["approved_data"]["skills"] == ["Python"]
+
+    # The original AI extraction must remain unchanged.
+    assert data["extracted_data"]["full_name"] == "Test Candidate"
+    assert data["extracted_data"]["skills"] == ["Python"]
+
+    assert data["reviewed_at"] is not None
+
+
+
+def test_cannot_approve_cv_with_empty_extracted_data(client, test_db):
+    candidate_id = create_candidate(client)
+
+    cv_document = CVDocument(
+        candidate_id=candidate_id,
+        original_filename="empty_cv.pdf",
+        stored_filename="empty_cv_unique.pdf",
+        file_path="storage/cvs/empty_cv.pdf",
+        file_type="pdf",
+        file_size=1024,
+        extracted_text="",
+        extracted_data={},
+        processing_status="processed",
+    )
+
+    test_db.add(cv_document)
+    test_db.commit()
+    test_db.refresh(cv_document)
+
+    response = client.post(
+        f"/api/v1/candidates/{candidate_id}"
+        f"/cv/{cv_document.id}/approve"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "No extracted CV information is available for approval."
+    )
+
+
+
+def test_cannot_approve_cv_with_invalid_extracted_data(client, test_db):
+    candidate_id = create_candidate(client)
+
+    cv_document = CVDocument(
+        candidate_id=candidate_id,
+        original_filename="invalid_cv.pdf",
+        stored_filename="invalid_cv_unique.pdf",
+        file_path="storage/cvs/invalid_cv.pdf",
+        file_type="pdf",
+        file_size=1024,
+        extracted_text="Invalid extracted information",
+        extracted_data={
+            "full_name": "Test Candidate",
+            "skills": "Python",
+        },
+        processing_status="processed",
+    )
+
+    test_db.add(cv_document)
+    test_db.commit()
+    test_db.refresh(cv_document)
+
+    response = client.post(
+        f"/api/v1/candidates/{candidate_id}"
+        f"/cv/{cv_document.id}/approve"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Extracted CV information is invalid and cannot be approved."
+    )

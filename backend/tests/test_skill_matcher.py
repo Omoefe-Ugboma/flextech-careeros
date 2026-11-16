@@ -47,24 +47,38 @@ def test_calculate_skill_coverage_without_requirements():
     )
 
     assert result is None
-    
-    
+
+
 def test_normalize_skill_aliases():
+    # PostgreSQL aliases
     assert normalize_skill("Postgres") == "postgresql"
     assert normalize_skill("PostgreSQL") == "postgresql"
+
+    # React aliases
     assert normalize_skill("ReactJS") == "react"
     assert normalize_skill("React.js") == "react"
+    assert normalize_skill("React JS") == "react"
+
+    # Git aliases
+    assert normalize_skill("Git/GitHub") == "git"
+    assert normalize_skill("Git and GitHub") == "git"
+    assert normalize_skill("Git & GitHub") == "git"
+
+    # Preserve unrelated programming languages
     assert normalize_skill("C++") == "c++"
     assert normalize_skill("C") == "c"
-    
+
+    assert normalize_skill("Git/GitHub") == "git"
+
 
 def test_compare_skills_with_aliases():
     result = compare_skills(
-        ["Postgres", "ReactJS", "Python"],
-        ["PostgreSQL", "React", "Python"],
+        ["Postgres", "ReactJS", "Python", "Git/GitHub"],
+        ["PostgreSQL", "React", "Python", "Git"],
     )
 
     assert result["matched_skills"] == [
+        "git",
         "postgresql",
         "python",
         "react",
@@ -72,7 +86,18 @@ def test_compare_skills_with_aliases():
 
     assert result["missing_skills"] == []
     assert result["extra_skills"] == []
-    
+
+
+def test_compare_git_alias_with_git_requirement():
+    result = compare_skills(
+        ["Git/GitHub", "Python"],
+        ["Git", "Python"],
+    )
+
+    assert result["matched_skills"] == ["git", "python"]
+    assert result["missing_skills"] == []
+    assert result["extra_skills"] == []
+
 
 def test_collect_skill_evidence():
     from app.services.matching.skill_matcher import (
@@ -80,25 +105,42 @@ def test_collect_skill_evidence():
     )
 
     approved_cv = {
-        "skills": ["Python", "FastAPI"],
+        "skills": [
+            "Python",
+            "FastAPI",
+            "Git/GitHub",
+        ],
         "projects": [
             {
                 "name": "CareerOS",
-                "technologies": ["Python", "Postgres"],
+                "technologies": [
+                    "Python",
+                    "Postgres",
+                    "Git",
+                ],
             }
         ],
     }
 
     result = collect_skill_evidence(approved_cv)
 
+    # Python has two sources of evidence.
     assert len(result["python"]) == 2
-
     assert result["python"][0]["source"] == "cv_skill"
     assert result["python"][1]["source"] == "project"
 
+    # PostgreSQL is normalized correctly.
     assert result["postgresql"][0]["details"] == "CareerOS"
+
+    # FastAPI is listed directly in the CV.
     assert result["fastapi"][0]["source"] == "cv_skill"
-    
+
+    # Git/GitHub and Git normalize to one skill,
+    # while preserving both evidence sources.
+    assert len(result["git"]) == 2
+    assert result["git"][0]["source"] == "cv_skill"
+    assert result["git"][1]["source"] == "project"
+
 
 def test_build_skill_match_result():
     from app.services.matching.skill_matcher import (
@@ -139,7 +181,7 @@ def test_build_skill_match_result():
     assert "postgresql" in result["skill_evidence"]
 
     assert len(result["skill_evidence"]["python"]) == 2
-    
+
 def test_build_preferred_skill_result():
     from app.services.matching.skill_matcher import (
         build_preferred_skill_result,

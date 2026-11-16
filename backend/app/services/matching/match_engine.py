@@ -46,7 +46,8 @@ def build_qualification_match_result(
                         "required_field": required_field,
                     },
                     "equivalent_experience": {
-                        "status": "not_assessed",
+                        "status": "unknown",
+                        "reason": "Equivalent experience cannot be assessed without a defined experience threshold",
                     },
                 })
             else:

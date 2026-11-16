@@ -137,7 +137,7 @@ def test_multiple_qualification_requirements_require_all_to_be_met():
     )
 
     assert result["qualifications"]["status"] == "not_met"
-    
+
 
 
 def test_unspecified_degree_and_equivalent_experience_are_separate():
@@ -167,7 +167,11 @@ def test_unspecified_degree_and_equivalent_experience_are_separate():
     }
 
     assert requirement["equivalent_experience"] == {
-        "status": "not_assessed",
+        "status": "unknown",
+        "reason": (
+            "Equivalent experience cannot be assessed "
+            "without a defined experience threshold"
+        ),
     }
 
 def test_complete_match_includes_experience_assessment():
@@ -213,3 +217,23 @@ def test_complete_match_includes_experience_assessment():
 
     assert result["experience"]["status"] == "met"
     assert result["experience"]["required_years"] == 3
+
+
+def test_qualification_requirement_with_equivalent_experience_is_not_assumed_met():
+    approved_cv = {
+        "education": [],
+        "work_experience": [],
+    }
+
+    result = build_qualification_match_result(
+        approved_cv=approved_cv,
+        qualifications=[
+            "A degree in Computer Science or equivalent experience"
+        ],
+    )
+
+    requirement = result["requirements"][0]
+
+    assert result["status"] == "unknown"
+    assert requirement["academic_requirement"]["status"] == "unknown"
+    assert requirement["equivalent_experience"]["status"] == "unknown"

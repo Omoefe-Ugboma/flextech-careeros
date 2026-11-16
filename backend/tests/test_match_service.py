@@ -71,7 +71,7 @@ def test_get_approved_cv_candidate_not_found(test_db):
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Candidate not found."
-    
+
 
 def test_get_approved_cv_document_not_found(test_db):
     candidate = create_candidate(test_db)
@@ -87,7 +87,7 @@ def test_get_approved_cv_document_not_found(test_db):
     assert exc_info.value.detail == (
         "CV document not found for this candidate."
     )
-    
+
 
 def test_get_approved_cv_rejects_another_candidates_cv(test_db):
     candidate_one = create_candidate(
@@ -116,7 +116,7 @@ def test_get_approved_cv_rejects_another_candidates_cv(test_db):
     assert exc_info.value.detail == (
         "CV document not found for this candidate."
     )
-    
+
 
 def test_get_approved_cv_rejects_unprocessed_cv(test_db):
     candidate = create_candidate(test_db)
@@ -138,7 +138,7 @@ def test_get_approved_cv_rejects_unprocessed_cv(test_db):
     assert exc_info.value.detail == (
         "CV document has not been processed successfully."
     )
-    
+
 
 def test_get_approved_cv_rejects_pending_review(test_db):
     candidate = create_candidate(test_db)
@@ -161,7 +161,7 @@ def test_get_approved_cv_rejects_pending_review(test_db):
     assert exc_info.value.detail == (
         "CV document has not been approved or contains no approved data."
     )
-    
+
 def test_get_approved_cv_rejects_empty_approved_data(test_db):
     candidate = create_candidate(test_db)
 
@@ -184,7 +184,7 @@ def test_get_approved_cv_rejects_empty_approved_data(test_db):
     assert exc_info.value.detail == (
         "CV document has not been approved or contains no approved data."
     )
-    
+
 
 def test_get_approved_cv_returns_valid_cv(test_db):
     candidate = create_candidate(test_db)
@@ -339,3 +339,84 @@ def test_run_candidate_job_match_saves_match_record(test_db):
     assert saved_match.job_description_id == job.id
     assert saved_match.match_score == 100.0
     assert result["match_results"]["qualifications"]["status"] == "met"
+
+    # Verify the weighted score was saved.
+    assert saved_match.match_score == 100.0
+
+    # Verify the scoring breakdown was included.
+    scoring = saved_match.match_results["scoring"]
+
+    assert scoring["overall_score"] == 100.0
+    assert scoring["assessment_completeness"] == 70.0
+    assert scoring["status"] == "incomplete"
+
+    # Verify individual criterion weights.
+    assert scoring["criteria"]["skills"]["weight"] == 50.0
+    assert scoring["criteria"]["qualifications"]["weight"] == 20.0
+    assert scoring["criteria"]["experience"]["weight"] == 30.0
+
+    # Verify experience was excluded because it was not required.
+    assert scoring["criteria"]["experience"]["status"] == "not_required"
+    assert scoring["criteria"]["experience"]["weighted_score"] is None
+
+    # Verify the returned result contains the same scoring breakdown.
+    assert result["match_results"]["scoring"] == scoring
+
+
+def test_run_candidate_job_match_calculates_partial_weighted_score(test_db):
+    candidate = create_candidate(test_db)
+
+    cv_document = create_cv(
+        test_db,
+        candidate_id=candidate.id,
+        approved_data={
+            "full_name": "Test Candidate",
+            "skills": ["Python"],
+            "education": [
+                {
+                    "qualification": "Bachelor's degree",
+                    "field_of_study": "Computer Science",
+                }
+            ],
+            "work_experience": [],
+            "projects": [],
+        },
+    )
+
+    job = create_job_description(
+        test_db,
+        extracted_data={
+            "required_skills": [
+                "Python",
+                "FastAPI",
+                "PostgreSQL",
+                "Docker",
+            ],
+            "preferred_skills": [],
+            "qualifications": [
+                "Bachelor's degree in Computer Science"
+            ],
+            "experience_requirement": "3 years of experience",
+        },
+    )
+
+    result = run_candidate_job_match(
+        db=test_db,
+        candidate_id=candidate.id,
+        cv_document_id=cv_document.id,
+        job_description_id=job.id,
+    )
+
+    scoring = result["match_results"]["scoring"]
+
+    assert result["match_score"] == 46.43
+    assert scoring["overall_score"] == 46.43
+    assert scoring["assessment_completeness"] == 70.0
+    assert scoring["status"] == "incomplete"
+
+    assert scoring["criteria"]["skills"]["assessment"] == 25.0
+    assert scoring["criteria"]["qualifications"]["status"] == "met"
+    assert scoring["criteria"]["experience"]["status"] == "unknown"
+
+    saved_match = test_db.get(CandidateJobMatch, result["id"])
+    assert saved_match.match_score == 46.43
