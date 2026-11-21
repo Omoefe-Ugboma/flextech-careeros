@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4.1-mini"
 
+    JWT_SECRET_KEY: str
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    COOKIE_SECURE: bool = False
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -6,6 +6,7 @@ from app.api.job_descriptions import router as job_descriptions_router
 from app.api.candidate_job_matches import (
     router as candidate_job_matches_router,
 )
+from app.api.auth import router as auth_router
 
 app = FastAPI(
     title="FlexTech CareerOS",
@@ -16,6 +17,7 @@ app = FastAPI(
 app.include_router(candidates_router)
 app.include_router(job_descriptions_router)
 app.include_router(candidate_job_matches_router)
+app.include_router(auth_router)
 
 
 @app.get("/")
