@@ -559,4 +559,227 @@ def test_verify_email_rejects_reused_token(client, test_db):
         "Verification link is invalid or expired."
     )
 
+def test_resend_verification_endpoint_returns_generic_response(
+    client,
+    test_db,
+):
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={
+            "email": "resenduser@example.com",
+        },
+    )
 
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
+
+def test_resend_verification_endpoint_for_unverified_user(
+    client,
+    test_db,
+):
+    email = "unverifiedresend@example.com"
+
+    register_response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert register_response.status_code == 201
+
+    user = test_db.query(User).filter_by(email=email).first()
+    assert user is not None
+    assert user.is_verified is False
+    
+    original_token = test_db.query(
+        EmailVerificationToken
+    ).filter_by(
+        user_id=user.id
+    ).first()
+
+    assert original_token is not None
+
+    original_token.created_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=2)
+    )
+
+    test_db.commit()
+        
+    
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={"email": email},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
+    tokens = test_db.query(EmailVerificationToken).filter_by(
+        user_id=user.id
+    ).all()
+
+    assert len(tokens) == 2
+    
+def test_resend_verification_invalidates_previous_token(
+    client,
+    test_db,
+):
+    email = "invalidateprevious@example.com"
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPassword123",
+        },
+    )
+
+    user = test_db.query(User).filter_by(email=email).first()
+    assert user is not None
+
+    previous_token = test_db.query(
+        EmailVerificationToken
+    ).filter_by(
+        user_id=user.id
+    ).first()
+
+    assert previous_token is not None
+
+    previous_token.created_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=2)
+    )
+    test_db.commit()
+
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={"email": email},
+    )
+
+    assert response.status_code == 200
+
+    test_db.refresh(previous_token)
+    assert previous_token.used_at is not None
+    
+def test_resend_verification_cooldown_returns_generic_response(
+    client,
+    test_db,
+):
+    email = "cooldownresend@example.com"
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPassword123",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={"email": email},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
+    user = test_db.query(User).filter_by(email=email).first()
+    assert user is not None
+
+    tokens = test_db.query(EmailVerificationToken).filter_by(
+        user_id=user.id
+    ).all()
+
+    assert len(tokens) == 1
+
+def test_resend_verification_for_verified_user_returns_generic_response(
+    client,
+    test_db,
+):
+    email = "verifiedresend@example.com"
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPassword123",
+        },
+    )
+
+    user = verify_test_user(test_db, email)
+
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={"email": email},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
+    tokens = test_db.query(EmailVerificationToken).filter_by(
+        user_id=user.id
+    ).all()
+
+    assert len(tokens) == 1
+    
+def test_resend_verification_for_inactive_user_returns_generic_response(
+    client,
+    test_db,
+):
+    email = "inactiveresend@example.com"
+
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPassword123",
+        },
+    )
+
+    user = test_db.query(User).filter_by(email=email).first()
+    assert user is not None
+
+    user.is_active = False
+    test_db.commit()
+
+    response = client.post(
+        "/api/v1/auth/resend-verification",
+        json={"email": email},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
+    tokens = test_db.query(EmailVerificationToken).filter_by(
+        user_id=user.id
+    ).all()
+
+    assert len(tokens) == 1
+    

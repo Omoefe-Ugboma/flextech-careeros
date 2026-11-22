@@ -31,3 +31,7 @@ class TokenResponse(BaseModel):
 
 class EmailVerificationRequest(BaseModel):
     token: str = Field(min_length=1, max_length=256)
+
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr

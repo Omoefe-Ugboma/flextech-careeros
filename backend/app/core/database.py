@@ -14,8 +14,11 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     COOKIE_SECURE: bool = False
+
+    RESEND_API_KEY: str | None = None
+    EMAIL_FROM: str = "FlexTech CareerOS <onboarding@resend.dev>"
+    FRONTEND_URL: str = "http://localhost:5173"
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

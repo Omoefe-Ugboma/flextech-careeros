@@ -17,6 +17,7 @@ from app.schemas.auth import (
     UserResponse,
     TokenResponse,
     EmailVerificationRequest,
+    ResendVerificationRequest,
 )
 from app.services.auth.registration import (
     register_user,
@@ -38,7 +39,9 @@ from app.services.auth.refresh import (
 
 from app.services.auth.email_verification import (
     verify_email,
+    resend_verification_token,
     InvalidVerificationTokenError,
+    VerificationResendCooldownError,
 )
 
 router = APIRouter(
@@ -96,6 +99,32 @@ def verify_user_email(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Verification link is invalid or expired.",
         )
+
+
+@router.post(
+    "/resend-verification",
+    status_code=status.HTTP_200_OK,
+)
+def resend_user_verification(
+    request_data: ResendVerificationRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        resend_verification_token(
+            db,
+            request_data.email,
+        )
+    except VerificationResendCooldownError:
+        # Keep the public response identical during the cooldown.
+        pass
+
+    return {
+        "message": (
+            "If an eligible account exists, "
+            "verification instructions will be sent."
+        )
+    }
+
 
 
 @router.post(
