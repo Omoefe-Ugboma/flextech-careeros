@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -6,6 +8,7 @@ from fastapi import (
     Response,
     status,
 )
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
@@ -18,6 +21,8 @@ from app.schemas.auth import (
     TokenResponse,
     EmailVerificationRequest,
     ResendVerificationRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
 )
 from app.services.auth.registration import (
     register_user,
@@ -36,19 +41,22 @@ from app.services.auth.refresh import (
     revoke_refresh_token,
     InvalidRefreshTokenError,
 )
-
 from app.services.auth.email_verification import (
     verify_email,
     resend_verification_token,
     InvalidVerificationTokenError,
     VerificationResendCooldownError,
 )
-
+from app.services.auth.password_reset import (
+    create_password_reset_token,
+    reset_user_password,
+    InvalidPasswordResetTokenError,
+)
 from app.services.email import (
     send_verification_email,
+    send_password_reset_email,
     EmailDeliveryError,
 )
-import logging
 
 
 logger = logging.getLogger(__name__)
@@ -153,6 +161,82 @@ def resend_user_verification(
         )
     }
 
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_200_OK,
+)
+def forgot_password(
+    request_data: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    email = str(request_data.email).lower()
+
+    user = db.scalar(
+        select(User).where(User.email == email)
+    )
+
+    if user is not None and user.is_active:
+        try:
+            reset_token = create_password_reset_token(
+                db,
+                user.id,
+            )
+
+            db.commit()
+
+            try:
+                send_password_reset_email(
+                    recipient=user.email,
+                    recipient_name=user.email.split("@")[0],
+                    reset_token=reset_token,
+                )
+            except EmailDeliveryError:
+                logger.error(
+                    "Password reset email delivery failed "
+                    "for user_id=%s",
+                    user.id,
+                )
+
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Password reset request failed for user_id=%s",
+                user.id,
+            )
+
+    return {
+        "message": (
+            "If an account exists with that email, "
+            "password reset instructions will be sent."
+        )
+    }
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_200_OK,
+)
+def reset_password(
+    request_data: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        reset_user_password(
+            db,
+            raw_token=request_data.token,
+            new_password=request_data.new_password,
+        )
+
+        return {
+            "message": "Your password has been reset successfully."
+        }
+
+    except InvalidPasswordResetTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset link is invalid or expired.",
+        )
 
 
 @router.post(

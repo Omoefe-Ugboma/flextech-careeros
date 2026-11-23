@@ -1,7 +1,6 @@
-import resend
-
-from app.core.database import settings
 from urllib.parse import urlencode
+import resend
+from app.core.database import settings
 
 class EmailDeliveryError(Exception):
     """Raised when an email cannot be delivered."""
@@ -12,6 +11,37 @@ def build_verification_url(token: str) -> str:
     return (
         f"{settings.FRONTEND_URL.rstrip('/')}"
         f"/verify-email?{query}"
+    )
+
+def build_password_reset_url(token: str) -> str:
+    query = urlencode({"token": token})
+
+    return (
+        f"{settings.FRONTEND_URL.rstrip('/')}"
+        f"/reset-password?{query}"
+    )
+
+
+def send_password_reset_email(
+    recipient: str,
+    recipient_name: str,
+    reset_token: str,
+) -> None:
+    from app.services.email_templates import (
+        password_reset_email_template,
+    )
+
+    reset_url = build_password_reset_url(reset_token)
+
+    html_content = password_reset_email_template(
+        recipient_name=recipient_name,
+        reset_url=reset_url,
+    )
+
+    send_email(
+        recipient=recipient,
+        subject="Reset your FlexTech CareerOS password",
+        html_content=html_content,
     )
 
 def send_verification_email(

@@ -53,3 +53,58 @@ def verification_email_template(
     </body>
     </html>
     """
+
+def password_reset_email_template(
+    recipient_name: str,
+    reset_url: str,
+) -> str:
+    safe_name = escape(recipient_name)
+    safe_url = escape(reset_url, quote=True)
+
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Reset your password</title>
+    </head>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+        <div style="max-width: 600px; margin: auto; padding: 30px;">
+            <h2>Password Reset Request</h2>
+
+            <p>Hello {safe_name},</p>
+
+            <p>
+                We received a request to reset your
+                FlexTech CareerOS password.
+            </p>
+
+            <a
+                href="{safe_url}"
+                style="
+                    display: inline-block;
+                    padding: 12px 24px;
+                    background-color: #2563eb;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 6px;
+                "
+            >
+                Reset Password
+            </a>
+
+            <p>
+                This link expires after 30 minutes.
+            </p>
+
+            <p>
+                If you did not request a password reset,
+                you can safely ignore this email.
+                Your password will remain unchanged.
+            </p>
+
+            <p>FlexTech CareerOS Team</p>
+        </div>
+    </body>
+    </html>
+    """

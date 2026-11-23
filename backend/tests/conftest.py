@@ -48,13 +48,21 @@ def client(test_db):
 
     app.dependency_overrides.clear()
 
+
+
 @pytest.fixture(autouse=True)
 def disable_real_email_delivery(monkeypatch):
-    def mock_send_verification_email(**kwargs):
+    def mock_email_delivery(**kwargs):
         return None
 
     monkeypatch.setattr(
         auth,
         "send_verification_email",
-        mock_send_verification_email,
+        mock_email_delivery,
+    )
+
+    monkeypatch.setattr(
+        auth,
+        "send_password_reset_email",
+        mock_email_delivery,
     )
