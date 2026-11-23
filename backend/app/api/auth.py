@@ -44,11 +44,18 @@ from app.services.auth.email_verification import (
     VerificationResendCooldownError,
 )
 
+from app.services.email import (
+    send_verification_email,
+    EmailDeliveryError,
+)
+import logging
+
+
+logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/v1/auth",
     tags=["Authentication"],
 )
-
 
 
 @router.post(
@@ -66,8 +73,17 @@ def register(
             user_data,
         )
 
-        # Email delivery will be connected in the next step.
-        # Never return the raw verification token through this endpoint.
+        try:
+            send_verification_email(
+                recipient=user.email,
+                recipient_name=user.email.split("@")[0],
+                verification_token=verification_token,
+            )
+        except EmailDeliveryError:
+            logger.error(
+                "Verification email delivery failed for user_id=%s",
+                user.id,
+            )
 
         return user
 
@@ -110,12 +126,24 @@ def resend_user_verification(
     db: Session = Depends(get_db),
 ):
     try:
-        resend_verification_token(
+        verification_token = resend_verification_token(
             db,
             request_data.email,
         )
+
+        if verification_token is not None:
+            try:
+                send_verification_email(
+                    recipient=request_data.email.lower(),
+                    recipient_name=request_data.email.split("@")[0],
+                    verification_token=verification_token,
+                )
+            except EmailDeliveryError:
+                logger.error(
+                    "Verification email delivery failed during resend."
+                )
+
     except VerificationResendCooldownError:
-        # Keep the public response identical during the cooldown.
         pass
 
     return {

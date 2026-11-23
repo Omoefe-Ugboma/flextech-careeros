@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.api import auth
 
 
 @pytest.fixture
@@ -46,3 +47,14 @@ def client(test_db):
         yield test_client
 
     app.dependency_overrides.clear()
+
+@pytest.fixture(autouse=True)
+def disable_real_email_delivery(monkeypatch):
+    def mock_send_verification_email(**kwargs):
+        return None
+
+    monkeypatch.setattr(
+        auth,
+        "send_verification_email",
+        mock_send_verification_email,
+    )
