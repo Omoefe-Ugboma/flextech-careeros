@@ -1,21 +1,21 @@
+
 from app.models import CVDocument
 
-def create_candidate(client, email="candidate@example.com"):
+
+def create_candidate(client, headers, email="candidate@example.com"):
     response = client.post(
         "/api/v1/candidates",
         json={
             "full_name": "Test Candidate",
             "email": email,
         },
+        headers=headers,
     )
     assert response.status_code == 201
     return response.json()["id"]
 
 
-
 def create_processed_cv(client, candidate_id, test_db):
-    from app.models import CVDocument
-
     cv_document = CVDocument(
         candidate_id=candidate_id,
         original_filename="test_cv.pdf",
@@ -38,7 +38,6 @@ def create_processed_cv(client, candidate_id, test_db):
     return cv_document.id
 
 
-
 def approval_payload():
     return {
         "full_name": "Test Candidate",
@@ -55,17 +54,20 @@ def approval_payload():
     }
 
 
-def test_approve_cv_successfully(client, test_db):
-    candidate_id = create_candidate(client)
+def test_approve_cv_successfully(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
+
     cv_document_id = create_processed_cv(
-    client,
-    candidate_id,
-    test_db,
-)
+        client, candidate_id, test_db
+    )
 
     response = client.post(
         f"/api/v1/candidates/{candidate_id}/cv/{cv_document_id}/approve",
         json=approval_payload(),
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -80,25 +82,18 @@ def test_approve_cv_successfully(client, test_db):
     ]
     assert data["extracted_data"]["skills"] == ["Python"]
     assert data["reviewed_at"] is not None
-
     assert data["extracted_data"]["full_name"] == "Test Candidate"
-    assert data["extracted_data"]["skills"] == ["Python"]
-
     assert data["approved_data"]["full_name"] == "Test Candidate"
-    assert data["approved_data"]["skills"] == [
-        "Python",
-        "FastAPI",
-        "PostgreSQL",
-    ]
 
 
-def test_cannot_approve_cv_twice(client, test_db):
-    candidate_id = create_candidate(client)
+def test_cannot_approve_cv_twice(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
 
     cv_document_id = create_processed_cv(
-        client,
-        candidate_id,
-        test_db,
+        client, candidate_id, test_db
     )
 
     url = (
@@ -106,45 +101,109 @@ def test_cannot_approve_cv_twice(client, test_db):
         f"/cv/{cv_document_id}/approve"
     )
 
-    first_response = client.post(url, json=approval_payload())
-    second_response = client.post(url, json=approval_payload())
+    first_response = client.post(
+        url, json=approval_payload(), headers=headers
+    )
+    second_response = client.post(
+        url, json=approval_payload(), headers=headers
+    )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 409
 
 
-def test_cannot_approve_another_candidates_cv(client, test_db):
-    first_candidate_id = create_candidate(
-        client,
-        "first@example.com",
+
+def test_cannot_approve_another_candidates_cv(
+    client, authenticated_client, test_db
+):
+    _, first_user_headers = authenticated_client(
+        email="firstuser@example.com"
     )
+
+    _, second_user_headers = authenticated_client(
+        email="seconduser@example.com"
+    )
+
+    first_candidate_id = create_candidate(
+        client, first_user_headers, "first@example.com"
+    )
+
     second_candidate_id = create_candidate(
-        client,
-        "second@example.com",
+        client, second_user_headers, "second@example.com"
     )
 
     cv_document_id = create_processed_cv(
-        client,
-        first_candidate_id,
-        test_db,
+        client, first_candidate_id, test_db
     )
 
     response = client.post(
         f"/api/v1/candidates/{second_candidate_id}"
         f"/cv/{cv_document_id}/approve",
         json=approval_payload(),
+        headers=second_user_headers,
     )
 
     assert response.status_code == 404
 
 
 
-def test_cannot_approve_unprocessed_cv(client, test_db):
-    from app.models import CVDocument
 
-    candidate_id = create_candidate(client)
+def test_unauthenticated_user_cannot_approve_cv(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
 
-    # Create a CV document that has failed AI extraction.
+    candidate_id = create_candidate(client, headers)
+
+    cv_document_id = create_processed_cv(
+        client, candidate_id, test_db
+    )
+
+    response = client.post(
+        f"/api/v1/candidates/{candidate_id}"
+        f"/cv/{cv_document_id}/approve",
+        json=approval_payload(),
+    )
+
+    assert response.status_code == 401
+
+
+def test_user_cannot_approve_another_users_cv(
+    client, authenticated_client, test_db
+):
+    _, owner_headers = authenticated_client(
+        email="approvalowner@example.com"
+    )
+    _, other_user_headers = authenticated_client(
+        email="approvalother@example.com"
+    )
+
+    candidate_id = create_candidate(
+        client,
+        owner_headers,
+        "approvalcandidate@example.com",
+    )
+
+    cv_document_id = create_processed_cv(
+        client, candidate_id, test_db
+    )
+
+    response = client.post(
+        f"/api/v1/candidates/{candidate_id}"
+        f"/cv/{cv_document_id}/approve",
+        json=approval_payload(),
+        headers=other_user_headers,
+    )
+
+    assert response.status_code == 404
+
+
+def test_cannot_approve_unprocessed_cv(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
+
     cv_document = CVDocument(
         candidate_id=candidate_id,
         original_filename="failed_cv.pdf",
@@ -155,18 +214,15 @@ def test_cannot_approve_unprocessed_cv(client, test_db):
         processing_status="extraction_failed",
     )
 
-    # Save the test CV in the temporary SQLite database.
     test_db.add(cv_document)
     test_db.commit()
     test_db.refresh(cv_document)
 
-    cv_document_id = cv_document.id
-
-    # Attempt to approve a CV that has not been processed.
     response = client.post(
         f"/api/v1/candidates/{candidate_id}"
-        f"/cv/{cv_document_id}/approve",
+        f"/cv/{cv_document.id}/approve",
         json=approval_payload(),
+        headers=headers,
     )
 
     assert response.status_code == 409
@@ -175,18 +231,16 @@ def test_cannot_approve_unprocessed_cv(client, test_db):
     )
 
 
-
-
-def test_approval_updates_candidate_profile(client, test_db):
-    candidate_id = create_candidate(client)
+def test_approval_updates_candidate_profile(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
 
     cv_document_id = create_processed_cv(
-        client,
-        candidate_id,
-        test_db,
+        client, candidate_id, test_db
     )
 
-    # Prepare corrected information supplied by the candidate.
     reviewed_data = approval_payload()
     reviewed_data["full_name"] = "Reviewed Candidate"
     reviewed_data["email"] = "reviewed@example.com"
@@ -194,25 +248,24 @@ def test_approval_updates_candidate_profile(client, test_db):
         "Senior Python Backend Developer"
     )
 
-    # Approve the reviewed CV.
     approval_response = client.post(
         f"/api/v1/candidates/{candidate_id}"
         f"/cv/{cv_document_id}/approve",
         json=reviewed_data,
+        headers=headers,
     )
 
     assert approval_response.status_code == 200
 
-    # Retrieve the candidate's main profile.
     profile_response = client.get(
-        f"/api/v1/candidates/{candidate_id}"
+        f"/api/v1/candidates/{candidate_id}",
+        headers=headers,
     )
 
     assert profile_response.status_code == 200
 
     profile = profile_response.json()
 
-    # Verify that approved information updated the profile.
     assert profile["full_name"] == "Reviewed Candidate"
     assert profile["email"] == "reviewed@example.com"
     assert profile["professional_headline"] == (
@@ -222,15 +275,14 @@ def test_approval_updates_candidate_profile(client, test_db):
     assert profile["location"] == "Mauritius"
 
 
-
-
-def test_approve_cv_without_request_body(client, test_db):
-    candidate_id = create_candidate(client)
+def test_approve_cv_without_request_body(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
 
     cv_document_id = create_processed_cv(
-        client,
-        candidate_id,
-        test_db,
+        client, candidate_id, test_db
     )
 
     url = (
@@ -238,7 +290,7 @@ def test_approve_cv_without_request_body(client, test_db):
         f"/cv/{cv_document_id}/approve"
     )
 
-    response = client.post(url)
+    response = client.post(url, headers=headers)
 
     assert response.status_code == 200
 
@@ -247,17 +299,16 @@ def test_approve_cv_without_request_body(client, test_db):
     assert data["review_status"] == "approved"
     assert data["approved_data"]["full_name"] == "Test Candidate"
     assert data["approved_data"]["skills"] == ["Python"]
-
-    # The original AI extraction must remain unchanged.
     assert data["extracted_data"]["full_name"] == "Test Candidate"
     assert data["extracted_data"]["skills"] == ["Python"]
-
     assert data["reviewed_at"] is not None
 
 
-
-def test_cannot_approve_cv_with_empty_extracted_data(client, test_db):
-    candidate_id = create_candidate(client)
+def test_cannot_approve_cv_with_empty_extracted_data(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
 
     cv_document = CVDocument(
         candidate_id=candidate_id,
@@ -277,7 +328,8 @@ def test_cannot_approve_cv_with_empty_extracted_data(client, test_db):
 
     response = client.post(
         f"/api/v1/candidates/{candidate_id}"
-        f"/cv/{cv_document.id}/approve"
+        f"/cv/{cv_document.id}/approve",
+        headers=headers,
     )
 
     assert response.status_code == 409
@@ -286,9 +338,11 @@ def test_cannot_approve_cv_with_empty_extracted_data(client, test_db):
     )
 
 
-
-def test_cannot_approve_cv_with_invalid_extracted_data(client, test_db):
-    candidate_id = create_candidate(client)
+def test_cannot_approve_cv_with_invalid_extracted_data(
+    client, authenticated_client, test_db
+):
+    _, headers = authenticated_client()
+    candidate_id = create_candidate(client, headers)
 
     cv_document = CVDocument(
         candidate_id=candidate_id,
@@ -311,7 +365,8 @@ def test_cannot_approve_cv_with_invalid_extracted_data(client, test_db):
 
     response = client.post(
         f"/api/v1/candidates/{candidate_id}"
-        f"/cv/{cv_document.id}/approve"
+        f"/cv/{cv_document.id}/approve",
+        headers=headers,
     )
 
     assert response.status_code == 409

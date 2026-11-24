@@ -28,6 +28,9 @@ from app.services.cv.ai_extractor import extract_candidate_information
 from app.services.cv.file_service import save_cv_file
 from app.services.cv.text_extractor import extract_cv_text
 
+from app.api.dependencies.auth import get_current_user
+from app.api.dependencies.authorization import require_platform_role
+from app.models.user import User
 
 router = APIRouter(
     prefix="/api/v1/candidates",
@@ -43,8 +46,14 @@ router = APIRouter(
 def create_candidate(
     candidate_data: CandidateCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_platform_role(["job_seeker"])
+    ),
 ):
-    candidate = Candidate(**candidate_data.model_dump())
+    candidate = Candidate(
+        **candidate_data.model_dump(),
+        user_id=current_user.id,
+    )
 
     db.add(candidate)
 
@@ -61,12 +70,19 @@ def create_candidate(
     return candidate
 
 
+
 @router.get("/{candidate_id}", response_model=CandidateRead)
 def get_candidate(
     candidate_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    candidate = db.get(Candidate, candidate_id)
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == current_user.id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -77,13 +93,21 @@ def get_candidate(
     return candidate
 
 
+
+
 @router.put("/{candidate_id}", response_model=CandidateRead)
 def update_candidate(
     candidate_id: int,
     candidate_data: CandidateUpdate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    candidate = db.get(Candidate, candidate_id)
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == current_user.id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -108,6 +132,8 @@ def update_candidate(
 
     return candidate
 
+
+
 @router.post(
     "/{candidate_id}/cv",
     response_model=CVDocumentRead,
@@ -117,8 +143,14 @@ async def upload_candidate_cv(
     candidate_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    candidate = db.get(Candidate, candidate_id)
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == current_user.id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -146,17 +178,12 @@ async def upload_candidate_cv(
     except Exception:
         db.rollback()
 
-        from pathlib import Path
-
         Path(file_details["file_path"]).unlink(missing_ok=True)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not save CV document.",
         )
-
-    # Extract text from the uploaded document.
-
 
     # Stage 1: Extract text from the uploaded document.
     try:
@@ -178,7 +205,6 @@ async def upload_candidate_cv(
         db.refresh(cv_document)
 
         return cv_document
-
 
     # Stage 2: Extract structured candidate information using OpenAI.
     try:
@@ -202,6 +228,8 @@ async def upload_candidate_cv(
 
 
 
+
+
 @router.get(
     "/{candidate_id}/cv/{cv_document_id}",
     response_model=CVDocumentRead,
@@ -211,9 +239,15 @@ def get_candidate_cv(
     candidate_id: int,
     cv_document_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    # 1. Confirm that the candidate exists.
-    candidate = db.get(Candidate, candidate_id)
+    # 1. Confirm that the candidate belongs to the logged-in user.
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == current_user.id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -221,7 +255,7 @@ def get_candidate_cv(
             detail="Candidate not found.",
         )
 
-    # 2. Retrieve and lock the candidate's CV.
+    # 2. Retrieve the CV belonging to this candidate.
     cv_document = db.scalar(
         select(CVDocument).where(
             CVDocument.id == cv_document_id,
@@ -250,9 +284,15 @@ def approve_candidate_cv(
     cv_document_id: int,
     reviewed_data: CVExtraction | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    # 1. Confirm that the candidate exists.
-    candidate = db.get(Candidate, candidate_id)
+    # 1. Confirm that the candidate belongs to the logged-in user.
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == current_user.id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -260,7 +300,7 @@ def approve_candidate_cv(
             detail="Candidate not found.",
         )
 
-    # 2. Find the CV belonging to this candidate.
+    # 2. Find and lock the CV belonging to this candidate.
     cv_document = db.scalar(
         select(CVDocument)
         .where(
@@ -290,7 +330,6 @@ def approve_candidate_cv(
             detail="This CV has already been reviewed.",
         )
 
-    # 5. Preserve the original extraction and save reviewed data.
     # 5. Select the data to approve.
     if reviewed_data is not None:
         approved_data = reviewed_data
@@ -316,7 +355,7 @@ def approve_candidate_cv(
         mode="json"
     )
 
-    # 6. Update the candidate's main profile.
+    # 7. Update the candidate's main profile.
     candidate_fields = [
         "full_name",
         "email",
@@ -332,11 +371,11 @@ def approve_candidate_cv(
         if value is not None:
             setattr(candidate, field, value)
 
-    # 7. Record human approval.
+    # 8. Record human approval.
     cv_document.review_status = "approved"
     cv_document.reviewed_at = datetime.now(timezone.utc)
 
-    # 8. Save everything in one transaction.
+    # 9. Save everything in one transaction.
     try:
         db.commit()
         db.refresh(cv_document)

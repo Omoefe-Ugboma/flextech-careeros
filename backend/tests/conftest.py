@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.api import auth
-
+from app.services.auth.token import create_access_token
 
 @pytest.fixture
 def test_db():
@@ -66,3 +66,39 @@ def disable_real_email_delivery(monkeypatch):
         "send_password_reset_email",
         mock_email_delivery,
     )
+    
+@pytest.fixture
+def authenticated_client(client, test_db):
+    from app.models.user import User
+    from app.models.user_role import UserRole
+
+    def create_authenticated_user(
+        email="jobseeker@example.com",
+        role="job_seeker",
+    ):
+        user = User(
+            email=email,
+            hashed_password="test-password-hash",
+            is_active=True,
+            is_verified=True,
+        )
+
+        test_db.add(user)
+        test_db.flush()
+
+        test_db.add(
+            UserRole(
+                user_id=user.id,
+                role=role,
+            )
+        )
+
+        test_db.commit()
+
+        access_token = create_access_token(user.id)
+
+        return user, {
+            "Authorization": f"Bearer {access_token}"
+        }
+
+    return create_authenticated_user
