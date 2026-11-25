@@ -1,3 +1,10 @@
+from app.schemas.auth import CompanyRegister
+
+from app.services.auth.company_registration import (
+    register_company as register_company_service,
+    OrganizationEmailAlreadyRegisteredError,
+)
+
 import logging
 
 from fastapi import (
@@ -100,6 +107,51 @@ def register(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
+
+
+
+@router.post(
+    "/register/company",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register_company_endpoint(
+    company_data: CompanyRegister,
+    db: Session = Depends(get_db),
+):
+    try:
+        user, _, verification_token = register_company_service(
+            db,
+            company_data,
+        )
+
+    except EmailAlreadyRegisteredError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An account with this administrator email already exists.",
+        )
+
+    except OrganizationEmailAlreadyRegisteredError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This company email is already registered.",
+        )
+
+    try:
+        send_verification_email(
+            recipient=user.email,
+            recipient_name=user.email.split("@")[0],
+            verification_token=verification_token,
+        )
+    except EmailDeliveryError:
+        logger.exception(
+            "Company administrator verification email delivery failed "
+            "for user_id=%s",
+            user.id,
+        )
+
+    return user
+
 
 
 @router.post(

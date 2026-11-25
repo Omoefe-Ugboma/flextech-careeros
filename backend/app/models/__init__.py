@@ -3,6 +3,12 @@ from app.models.candidate import Candidate
 from app.models.cv_document import CVDocument
 from app.models.job_description import JobDescription
 from app.models.candidate_job_match import CandidateJobMatch
+from app.models.candidate_organization_access import (
+    CandidateOrganizationAccess,
+)
+from app.models.candidate_access_audit_event import (
+    CandidateAccessAuditEvent,
+)
 
 from app.models.user import User
 from app.models.organization import Organization
@@ -18,6 +24,7 @@ __all__ = [
     "CVDocument",
     "JobDescription",
     "CandidateJobMatch",
+    "CandidateOrganizationAccess",
     "User",
     "Organization",
     "OrganizationMembership",

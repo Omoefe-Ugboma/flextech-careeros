@@ -2,9 +2,14 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
+from app.models.organization import Organization
+from app.models.organization_membership import OrganizationMembership
+from app.models.email_verification_token import EmailVerificationToken
+from app.services.auth.email_verification import hash_verification_token
+from app.services.email import EmailDeliveryError
+
 from app.core.database import get_db
 from app.main import app
-from app.models.email_verification_token import EmailVerificationToken
 from app.models.password_reset_token import PasswordResetToken
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -1295,3 +1300,172 @@ def test_resend_verification_handles_email_delivery_failure(
     assert user.is_verified is False
 
     assert "Simulated email failure" not in response.text
+
+
+def test_company_registration_endpoint_success(
+    client,
+    test_db,
+    monkeypatch,
+):
+    captured_email = {}
+
+    def mock_send_verification_email(**kwargs):
+        captured_email.update(kwargs)
+
+    monkeypatch.setattr(
+        "app.api.auth.send_verification_email",
+        mock_send_verification_email,
+    )
+
+    response = client.post(
+        "/api/v1/auth/register/company",
+        json={
+            "company_name": "FlexTech Solutions",
+            "company_email": "contact@flextech.example",
+            "website": "https://flextech.example",
+            "description": "Software development company.",
+            "admin_email": "admin@flextech.example",
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["email"] == "admin@flextech.example"
+    assert "verification_token" not in response.json()
+
+    user = test_db.query(User).filter_by(
+        email="admin@flextech.example"
+    ).first()
+
+    organization = test_db.query(Organization).filter_by(
+        company_email="contact@flextech.example"
+    ).first()
+
+    assert user is not None
+    assert organization is not None
+    assert user.is_verified is False
+    assert organization.is_verified is False
+
+    membership = test_db.query(OrganizationMembership).filter_by(
+        user_id=user.id,
+        organization_id=organization.id,
+    ).first()
+
+    assert membership is not None
+    assert membership.role == "company_admin"
+    assert membership.membership_status == "pending"
+
+    assert captured_email["recipient"] == "admin@flextech.example"
+    assert captured_email["verification_token"]
+
+    stored_token = test_db.query(EmailVerificationToken).filter_by(
+        user_id=user.id
+    ).first()
+
+    assert stored_token is not None
+    assert stored_token.token_hash == hash_verification_token(
+        captured_email["verification_token"]
+    )
+
+    assert captured_email["verification_token"] not in response.text
+
+
+def test_company_registration_rejects_duplicate_admin_email(
+    client,
+    test_db,
+):
+    client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "existingadmin@example.com",
+            "password": "StrongPassword123",
+        },
+    )
+
+    response = client.post(
+        "/api/v1/auth/register/company",
+        json={
+            "company_name": "Another Company",
+            "company_email": "another@company.example",
+            "admin_email": "existingadmin@example.com",
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert response.status_code == 409
+
+
+def test_company_registration_rejects_duplicate_company_email(
+    client,
+    monkeypatch,
+):
+    def mock_send_verification_email(**kwargs):
+        pass
+
+    monkeypatch.setattr(
+        "app.api.auth.send_verification_email",
+        mock_send_verification_email,
+    )
+
+    first_response = client.post(
+        "/api/v1/auth/register/company",
+        json={
+            "company_name": "First Company",
+            "company_email": "contact@duplicate.example",
+            "admin_email": "firstadmin@duplicate.example",
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert first_response.status_code == 201
+
+    second_response = client.post(
+        "/api/v1/auth/register/company",
+        json={
+            "company_name": "Second Company",
+            "company_email": "contact@duplicate.example",
+            "admin_email": "secondadmin@duplicate.example",
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert second_response.status_code == 409
+
+
+def test_company_registration_handles_email_delivery_failure(
+    client,
+    test_db,
+    monkeypatch,
+):
+    def mock_failed_email_delivery(**kwargs):
+        raise EmailDeliveryError("Simulated email failure")
+
+    monkeypatch.setattr(
+        "app.api.auth.send_verification_email",
+        mock_failed_email_delivery,
+    )
+
+    response = client.post(
+        "/api/v1/auth/register/company",
+        json={
+            "company_name": "Email Failure Company",
+            "company_email": "contact@emailfailure.example",
+            "admin_email": "admin@emailfailure.example",
+            "password": "StrongPassword123",
+        },
+    )
+
+    assert response.status_code == 201
+
+    user = test_db.query(User).filter_by(
+        email="admin@emailfailure.example"
+    ).first()
+
+    organization = test_db.query(Organization).filter_by(
+        company_email="contact@emailfailure.example"
+    ).first()
+
+    assert user is not None
+    assert organization is not None
+    assert user.is_verified is False
+    assert organization.is_verified is False

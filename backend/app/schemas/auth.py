@@ -8,6 +8,13 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
 
+class CompanyRegister(BaseModel):
+    company_name: str = Field(min_length=2, max_length=200)
+    company_email: EmailStr
+    website: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    admin_email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
 
 class UserLogin(BaseModel):
     email: EmailStr

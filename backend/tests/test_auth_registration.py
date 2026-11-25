@@ -3,6 +3,15 @@ import pytest
 
 from sqlalchemy import select
 
+from app.models.organization import Organization
+from app.models.organization_membership import OrganizationMembership
+from app.schemas.auth import CompanyRegister
+from app.services.auth.company_registration import (
+    OrganizationEmailAlreadyRegisteredError,
+    register_company,
+)
+
+
 from app.models.user import User
 from app.models.user_role import UserRole
 from app.models.email_verification_token import EmailVerificationToken
@@ -101,3 +110,159 @@ def test_registered_password_can_be_verified(test_db):
     user, _ = register_user(test_db, user_data)
 
     assert verify_password(password, user.hashed_password)
+
+
+
+def create_company_registration_data(
+    admin_email="admin@flextech.example",
+    company_email="contact@flextech.example",
+):
+    return CompanyRegister(
+        company_name="FlexTech Solutions",
+        company_email=company_email,
+        website="https://flextech.example",
+        description="Technology and software development company.",
+        admin_email=admin_email,
+        password="StrongPassword123",
+    )
+
+
+def test_register_company_successfully(test_db):
+    company_data = create_company_registration_data()
+
+    user, organization, verification_token = register_company(
+        test_db,
+        company_data,
+    )
+
+    assert user.id is not None
+    assert user.email == "admin@flextech.example"
+    assert user.is_active is True
+    assert user.is_verified is False
+
+    assert organization.id is not None
+    assert organization.name == "FlexTech Solutions"
+    assert organization.company_email == "contact@flextech.example"
+    assert organization.is_active is True
+    assert organization.is_verified is False
+
+    assert isinstance(verification_token, str)
+
+
+def test_register_company_creates_pending_admin_membership(test_db):
+    company_data = create_company_registration_data()
+
+    user, organization, _ = register_company(test_db, company_data)
+
+    membership = test_db.scalar(
+        select(OrganizationMembership).where(
+            OrganizationMembership.user_id == user.id,
+            OrganizationMembership.organization_id == organization.id,
+        )
+    )
+
+    assert membership is not None
+    assert membership.role == "company_admin"
+    assert membership.membership_status == "pending"
+
+
+def test_register_company_does_not_assign_job_seeker_role(test_db):
+    company_data = create_company_registration_data()
+
+    user, _, _ = register_company(test_db, company_data)
+
+    role = test_db.scalar(
+        select(UserRole).where(UserRole.user_id == user.id)
+    )
+
+    assert role is None
+
+
+def test_register_company_creates_verification_token(test_db):
+    company_data = create_company_registration_data()
+
+    user, _, raw_token = register_company(test_db, company_data)
+
+    stored_token = test_db.scalar(
+        select(EmailVerificationToken).where(
+            EmailVerificationToken.user_id == user.id
+        )
+    )
+
+    assert stored_token is not None
+    assert stored_token.token_hash == hash_verification_token(raw_token)
+    assert stored_token.token_hash != raw_token
+    assert stored_token.used_at is None
+
+
+def test_register_company_normalizes_emails(test_db):
+    company_data = create_company_registration_data(
+        admin_email="Admin@FlexTech.Example",
+        company_email="Contact@FlexTech.Example",
+    )
+
+    user, organization, _ = register_company(test_db, company_data)
+
+    assert user.email == "admin@flextech.example"
+    assert organization.company_email == "contact@flextech.example"
+
+
+def test_register_company_rejects_duplicate_admin_email(test_db):
+    company_data = create_company_registration_data()
+
+    register_company(test_db, company_data)
+
+    duplicate_data = create_company_registration_data(
+        company_email="another@flextech.example",
+    )
+
+    with pytest.raises(EmailAlreadyRegisteredError):
+        register_company(test_db, duplicate_data)
+
+
+def test_register_company_rejects_duplicate_company_email(test_db):
+    company_data = create_company_registration_data()
+
+    register_company(test_db, company_data)
+
+    duplicate_data = create_company_registration_data(
+        admin_email="another-admin@flextech.example",
+    )
+
+    with pytest.raises(OrganizationEmailAlreadyRegisteredError):
+        register_company(test_db, duplicate_data)
+
+
+def test_register_company_rolls_back_if_token_creation_fails(
+    test_db,
+    monkeypatch,
+):
+    from app.services.auth import company_registration
+
+    def fail_token_creation(db, user_id):
+        raise RuntimeError("Simulated token creation failure")
+
+    monkeypatch.setattr(
+        company_registration,
+        "create_verification_token",
+        fail_token_creation,
+    )
+
+    company_data = create_company_registration_data()
+
+    with pytest.raises(RuntimeError):
+        register_company(test_db, company_data)
+
+    assert test_db.scalar(
+        select(User).where(User.email == "admin@flextech.example")
+    ) is None
+
+    assert test_db.scalar(
+        select(Organization).where(
+            Organization.company_email == "contact@flextech.example"
+        )
+    ) is None
+
+    assert test_db.scalar(
+        select(OrganizationMembership)
+    ) is None

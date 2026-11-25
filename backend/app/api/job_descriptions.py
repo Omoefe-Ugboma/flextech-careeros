@@ -3,8 +3,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.dependencies.authorization import (
+    require_verified_organization_role,
+)
 from app.core.database import get_db
 from app.models import JobDescription
+from app.models.organization import Organization
+from app.models.user import User
 from app.schemas.job_description import (
     JobDescriptionCreate,
     JobDescriptionRead,
@@ -18,6 +23,10 @@ router = APIRouter(
     tags=["Job Descriptions"],
 )
 
+require_company_access = require_verified_organization_role(
+    ["company_admin", "recruiter"]
+)
+
 
 @router.post(
     "",
@@ -26,12 +35,26 @@ router = APIRouter(
 )
 def create_job_description(
     job_data: JobDescriptionCreate,
+    organization_id: int,
+    current_user: User = Depends(require_company_access),
     db: Session = Depends(get_db),
 ):
-    # 1. Save the original job description first.
+    # The authorization dependency has already verified
+    # the user's membership and organization status.
+    organization = db.get(Organization, organization_id)
+
+    if organization is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found.",
+        )
+
+    # Always use the verified organization's name.
+    # Do not trust a company name supplied by the client.
     job_description = JobDescription(
+        organization_id=organization.id,
         job_title=job_data.job_title,
-        company_name=job_data.company_name,
+        company_name=organization.name,
         location=job_data.location,
         original_description=job_data.original_description,
         processing_status="pending",
@@ -49,7 +72,7 @@ def create_job_description(
             detail="Could not save job description.",
         )
 
-    # 2. Extract structured requirements using OpenAI.
+    # Extract structured requirements using OpenAI.
     try:
         extracted_information = extract_job_requirements(
             job_description.original_description
@@ -64,7 +87,7 @@ def create_job_description(
     except Exception:
         job_description.processing_status = "extraction_failed"
 
-    # 3. Save the extraction result or failure status.
+    # Save extraction result or failure status.
     try:
         db.commit()
         db.refresh(job_description)
@@ -84,10 +107,16 @@ def create_job_description(
     response_model=list[JobDescriptionRead],
 )
 def list_job_descriptions(
+    organization_id: int,
+    current_user: User = Depends(require_company_access),
     db: Session = Depends(get_db),
 ):
-    statement = select(JobDescription).order_by(
-        JobDescription.created_at.desc()
+    statement = (
+        select(JobDescription)
+        .where(
+            JobDescription.organization_id == organization_id
+        )
+        .order_by(JobDescription.created_at.desc())
     )
 
     return db.scalars(statement).all()
@@ -99,12 +128,16 @@ def list_job_descriptions(
 )
 def get_job_description(
     job_description_id: int,
+    organization_id: int,
+    current_user: User = Depends(require_company_access),
     db: Session = Depends(get_db),
 ):
-    job_description = db.get(
-        JobDescription,
-        job_description_id,
+    statement = select(JobDescription).where(
+        JobDescription.id == job_description_id,
+        JobDescription.organization_id == organization_id,
     )
+
+    job_description = db.scalar(statement)
 
     if job_description is None:
         raise HTTPException(

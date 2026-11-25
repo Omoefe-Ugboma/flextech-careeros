@@ -2,7 +2,14 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, Integer, String, Text, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +22,15 @@ class JobDescription(Base):
     id: Mapped[int] = mapped_column(
         Integer,
         primary_key=True,
+        index=True,
+    )
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "organizations.id",
+            name="fk_job_descriptions_organization_id_organizations",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
         index=True,
     )
 
