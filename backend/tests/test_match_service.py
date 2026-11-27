@@ -1,6 +1,6 @@
 import pytest
 from fastapi import HTTPException
-
+from app.models.user import User
 from app.models import (
     Candidate,
     CVDocument,
@@ -14,8 +14,22 @@ from app.services.matching.match_service import (
     run_candidate_job_match,
 )
 
-def create_candidate(db, email="candidate@example.com"):
+def create_candidate(
+    db,
+    email="candidate@example.com",
+):
+    user = User(
+        email=f"user-{email}",
+        hashed_password="test-password-hash",
+        is_active=True,
+        is_verified=True,
+    )
+
+    db.add(user)
+    db.flush()
+
     candidate = Candidate(
+        user_id=user.id,
         full_name="Test Candidate",
         email=email,
     )
@@ -67,6 +81,7 @@ def test_get_approved_cv_candidate_not_found(test_db):
             db=test_db,
             candidate_id=999,
             cv_document_id=1,
+            candidate_owner_user_id=1,
         )
 
     assert exc_info.value.status_code == 404
@@ -81,6 +96,7 @@ def test_get_approved_cv_document_not_found(test_db):
             db=test_db,
             candidate_id=candidate.id,
             cv_document_id=999,
+            candidate_owner_user_id=candidate.user_id,
         )
 
     assert exc_info.value.status_code == 404
@@ -110,6 +126,7 @@ def test_get_approved_cv_rejects_another_candidates_cv(test_db):
             db=test_db,
             candidate_id=candidate_two.id,
             cv_document_id=cv_document.id,
+            candidate_owner_user_id=candidate_two.user_id,
         )
 
     assert exc_info.value.status_code == 404
@@ -132,6 +149,7 @@ def test_get_approved_cv_rejects_unprocessed_cv(test_db):
             db=test_db,
             candidate_id=candidate.id,
             cv_document_id=cv_document.id,
+            candidate_owner_user_id=candidate.user_id,
         )
 
     assert exc_info.value.status_code == 409
@@ -155,6 +173,7 @@ def test_get_approved_cv_rejects_pending_review(test_db):
             db=test_db,
             candidate_id=candidate.id,
             cv_document_id=cv_document.id,
+            candidate_owner_user_id=candidate.user_id,
         )
 
     assert exc_info.value.status_code == 409
@@ -178,6 +197,7 @@ def test_get_approved_cv_rejects_empty_approved_data(test_db):
             db=test_db,
             candidate_id=candidate.id,
             cv_document_id=cv_document.id,
+            candidate_owner_user_id=candidate.user_id,
         )
 
     assert exc_info.value.status_code == 409
@@ -210,6 +230,7 @@ def test_get_approved_cv_returns_valid_cv(test_db):
         db=test_db,
         candidate_id=candidate.id,
         cv_document_id=cv_document.id,
+        candidate_owner_user_id=candidate.user_id,
     )
 
     assert result.id == cv_document.id
@@ -329,6 +350,7 @@ def test_run_candidate_job_match_saves_match_record(test_db):
         candidate_id=candidate.id,
         cv_document_id=cv_document.id,
         job_description_id=job.id,
+        candidate_owner_user_id=candidate.user_id,
     )
 
     saved_match = test_db.get(CandidateJobMatch, result["id"])
@@ -405,6 +427,7 @@ def test_run_candidate_job_match_calculates_partial_weighted_score(test_db):
         candidate_id=candidate.id,
         cv_document_id=cv_document.id,
         job_description_id=job.id,
+        candidate_owner_user_id=candidate.user_id,
     )
 
     scoring = result["match_results"]["scoring"]
@@ -420,3 +443,36 @@ def test_run_candidate_job_match_calculates_partial_weighted_score(test_db):
 
     saved_match = test_db.get(CandidateJobMatch, result["id"])
     assert saved_match.match_score == 46.43
+
+
+def test_get_approved_cv_rejects_candidate_owned_by_another_user(
+    test_db,
+):
+    candidate = create_candidate(test_db)
+
+    cv_document = create_cv(
+        test_db,
+        candidate_id=candidate.id,
+    )
+
+    another_user = User(
+        email="another-user@example.com",
+        hashed_password="test-password-hash",
+        is_active=True,
+        is_verified=True,
+    )
+
+    test_db.add(another_user)
+    test_db.commit()
+    test_db.refresh(another_user)
+
+    with pytest.raises(HTTPException) as exc_info:
+        get_approved_cv(
+            db=test_db,
+            candidate_id=candidate.id,
+            cv_document_id=cv_document.id,
+            candidate_owner_user_id=another_user.id,
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Candidate not found."

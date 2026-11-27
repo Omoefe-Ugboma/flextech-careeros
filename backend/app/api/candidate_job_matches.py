@@ -13,6 +13,8 @@ from app.services.matching.match_service import (
     run_candidate_job_match,
 )
 
+from app.api.dependencies.authorization import require_platform_role
+from app.models.user import User
 
 router = APIRouter(
     prefix="/api/v1/candidate-job-matches",
@@ -20,18 +22,18 @@ router = APIRouter(
 )
 
 
-@router.post(
-    "",
-    response_model=CandidateJobMatchRead,
-    status_code=201,
-)
+@router.post("", response_model=CandidateJobMatchRead, status_code=201)
 def create_candidate_job_match(
     match_data: CandidateJobMatchCreate,
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_platform_role(["job_seeker"])
+    ),
 ):
     return run_candidate_job_match(
         db=db,
         candidate_id=match_data.candidate_id,
         cv_document_id=match_data.cv_document_id,
         job_description_id=match_data.job_description_id,
+        candidate_owner_user_id=current_user.id,
     )

@@ -20,10 +20,14 @@ def get_approved_cv(
     db: Session,
     candidate_id: int,
     cv_document_id: int,
+    candidate_owner_user_id: int,
 ) -> CVDocument:
-
-    # 1. Verify that the candidate exists.
-    candidate = db.get(Candidate, candidate_id)
+    candidate = db.scalar(
+        select(Candidate).where(
+            Candidate.id == candidate_id,
+            Candidate.user_id == candidate_owner_user_id,
+        )
+    )
 
     if candidate is None:
         raise HTTPException(
@@ -31,7 +35,6 @@ def get_approved_cv(
             detail="Candidate not found.",
         )
 
-    # 2. Retrieve a CV belonging to this candidate.
     statement = select(CVDocument).where(
         CVDocument.id == cv_document_id,
         CVDocument.candidate_id == candidate_id,
@@ -45,21 +48,22 @@ def get_approved_cv(
             detail="CV document not found for this candidate.",
         )
 
-    # 3. Verify that CV processing succeeded.
     if cv_document.processing_status != "processed":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="CV document has not been processed successfully.",
         )
 
-    # 4. Verify human approval.
     if (
         cv_document.review_status != "approved"
         or not cv_document.approved_data
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="CV document has not been approved or contains no approved data.",
+            detail=(
+                "CV document has not been approved "
+                "or contains no approved data."
+            ),
         )
 
     return cv_document
@@ -98,6 +102,7 @@ def run_candidate_job_match(
     candidate_id: int,
     cv_document_id: int,
     job_description_id: int,
+    candidate_owner_user_id: int,
 ) -> dict:
 
     # 1. Retrieve and validate the candidate's approved CV.
@@ -105,6 +110,7 @@ def run_candidate_job_match(
         db=db,
         candidate_id=candidate_id,
         cv_document_id=cv_document_id,
+        candidate_owner_user_id=candidate_owner_user_id,
     )
 
     # 2. Retrieve and validate the processed job description.
